@@ -4,3 +4,11 @@
 2、软件架构：前端负责渲染以及交互，后端负责实现LLM调用
 3、软件框架：前端Vue3+Vite+threejs，后端Python+DeepAgents+FastAPI+SQLite
 4、方便后续进行测试和代码生成，给我SPEC即可
+成果：SPEC.md
+
+##二
+我想撰写一个软件SPEC，需求是：
+1、软件功能：实现一个编辑单个柜子家具3D模型的在线网站，用户可以通过编辑面板对柜子增删改（主要针对柜子的各板件和组件进行编辑），也可以通过自然语言直接编辑柜子
+2、软件架构：前端负责渲染、交互与编辑面板的编辑逻辑；后端负责实现数据记录与查询，主要实现LLM Agent的实现
+3、软件框架：前端Vue3+Vite+threejs，后端Python+DeepAgents+FastAPI+SQLite
+4、方便后续进行测试和代码生成，给我SPEC即可，保存到SPEC2.md
