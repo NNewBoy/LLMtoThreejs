@@ -140,7 +140,7 @@ function rebuildMeshes() {
 }
 
 function updateMeshes() {
-  if (!store.cabinet) return;
+  if (!store.cabinet || !scene) return;
 
   const currentIds = new Set(store.sortedComponents.map((c) => c.id));
 

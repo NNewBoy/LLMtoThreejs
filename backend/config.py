@@ -19,8 +19,8 @@ class Settings(BaseSettings):
 
     # CORS
     CORS_ORIGINS: list[str] = os.getenv(
-        "CORS_ORIGINS", "http://localhost:5173,http://localhost:3000"
-    ).split(",")
+        "CORS_ORIGINS", ["http://localhost:5173", "http://localhost:3000"]
+    )
 
 
 settings = Settings()

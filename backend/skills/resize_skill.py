@@ -23,6 +23,13 @@ class ResizeSkill(BaseSkill):
         update_component = self.tools["update_component"]
 
         cabinet = await get_structure(cabinet_id)
+        if not cabinet or "height" not in cabinet:
+            return SkillResult(
+                success=False,
+                message=f"找不到柜子 (ID: {cabinet_id})",
+                operations=[],
+                error="cabinet_not_found",
+            )
 
         new_width = params.get("width", cabinet["width"])
         new_height = params.get("height", cabinet["height"])

@@ -140,6 +140,13 @@ class AIService:
     def _save_message(self, cabinet_id: int, role: str, content: str) -> None:
         """Persist a chat message to the database."""
         try:
+            # Check if cabinet exists, create if not
+            cabinet = self.db.query(Cabinet).filter(Cabinet.id == cabinet_id).first()
+            if not cabinet:
+                cabinet = Cabinet(id=cabinet_id, name="未命名柜子")
+                self.db.add(cabinet)
+                self.db.flush()
+
             record = AIChatHistory(
                 cabinet_id=cabinet_id,
                 role=role,

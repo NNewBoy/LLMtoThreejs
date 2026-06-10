@@ -26,6 +26,14 @@ class ShelfSkill(BaseSkill):
         add_component = self.tools["add_component"]
 
         cabinet = await get_structure(cabinet_id)
+        if not cabinet or "height" not in cabinet:
+            return SkillResult(
+                success=False,
+                message=f"找不到柜子 (ID: {cabinet_id})",
+                operations=[],
+                error="cabinet_not_found",
+            )
+
         internal = self._calc_internal_space(cabinet)
 
         position_ratios = params.get("position_ratios")

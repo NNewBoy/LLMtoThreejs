@@ -36,6 +36,14 @@ class DoorSkill(BaseSkill):
         remove_component = self.tools["remove_component"]
 
         cabinet = await get_structure(cabinet_id)
+        if not cabinet or "height" not in cabinet:
+            return SkillResult(
+                success=False,
+                message=f"找不到柜子 (ID: {cabinet_id})",
+                operations=[],
+                error="cabinet_not_found",
+            )
+
         count = params.get("count", 1)
         style = params.get("style", "flat")
         cover_range = params.get("cover_range", "full")
