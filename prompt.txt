@@ -20,3 +20,91 @@
 2、软件架构：前端负责渲染、交互与编辑面板的编辑逻辑；后端负责实现数据记录与查询，主要实现LLM Agent+skills
 3、软件框架：前端Vue3+Vite+threejs，后端Python+DeepAgents+FastAPI+SQLite
 4、方便后续进行测试和代码生成，给我SPEC即可，保存到SPEC2.md
+
+##四1
+@file:SPEC2.md 基于这个SPEC文档进行设计与规划，完成完整的项目，使用Claude Code编写代码
+
+###成果
+=== Project Structure ===
+D:\AIProjects\LLMtoThreejs\
+├── SPEC2.md                          # Specification
+├── backend/                          # FastAPI + SQLAlchemy + Agent
+│   ├── main.py                       # App entry with CORS + all routers
+│   ├── config.py                     # Settings (DB, LLM, CORS)
+│   ├── database.py                   # SQLAlchemy engine + session
+│   ├── .env                          # Configuration
+│   ├── requirements.txt              # Python dependencies
+│   ├── models/                       # ORM models (4 tables)
+│   │   ├── cabinet.py, component.py
+│   │   ├── operation_history.py, ai_chat.py
+│   ├── schemas/                      # Pydantic v2 request/response
+│   │   ├── cabinet.py, component.py, history.py, ai.py, common.py
+│   ├── services/                     # Business logic
+│   │   ├── cabinet_service.py        # CRUD + default board init
+│   │   ├── component_service.py      # Board CRUD
+│   │   ├── history_service.py        # Operation history
+│   │   └── ai_service.py             # AI chat orchestration
+│   ├── routers/                      # API endpoints
+│   │   ├── cabinets.py, components.py, history.py, ai.py (SSE)
+│   ├── agent/                        # LLM Agent layer
+│   │   ├── agent.py                  # CabinetAgent (OpenAI function calling)
+│   │   ├── tools.py                  # 8 atomic tool functions
+│   │   ├── prompts.py                # System prompt with coord system
+│   │   └── skill_registry.py         # Skill registration + schema gen
+│   └── skills/                       # 7 Skills
+│       ├── base.py                   # BaseSkill ABC + SkillResult
+│       ├── shelf_skill.py            # add_shelf (collision detection)
+│       ├── door_skill.py             # add_doors (styles + handles)
+│       ├── drawer_skill.py           # add_drawers
+│       ├── material_skill.py         # change_material (batch)
+│       ├── query_skill.py            # query_structure
+│       ├── resize_skill.py           # adjust_cabinet_size
+│       └── layout_skill.py           # reorganize_layout (sub-skill orchestration)
+│
+├── frontend/                         # Vue 3 + TypeScript + Three.js
+│   ├── vite.config.ts                # Proxy to backend
+│   ├── src/
+│   │   ├── main.ts                   # App entry with Pinia
+│   │   ├── App.vue                   # Layout: header + canvas + panel + status
+│   │   ├── types/index.ts            # All TS interfaces + enums + material map
+│   │   ├── engine/
+│   │   │   ├── ConstraintSolver.ts   # 12 constraint rules (SPEC2 4.1.3)
+│   │   │   ├── BoardFactory.ts       # Component data + Three.js mesh creation
+│   │   │   └── SnapshotManager.ts    # Undo/redo
+│   │   ├── stores/
+│   │   │   ├── cabinet.ts            # Cabinet state + CRUD + AI ops
+│   │   │   └── chat.ts               # SSE chat + skill progress
+│   │   └── components/
+│   │       ├── ThreeCanvas.vue       # Full 3D scene (lights, controls, raycasting, exploded/xray)
+│   │       ├── RightPanel.vue        # Tab panel (property + AI)
+│   │       ├── PropertyTab.vue       # Board editor + component tree
+│   │       └── AITab.vue             # Chat UI + skill progress + op confirm
+
+
+
+=== Stats ===
+Backend:  38 Python files, ~2700 lines
+Frontend: 13 TS/Vue files, ~1170 lines
+Total:    ~3870 lines of working code
+
+
+=== To Run ===
+
+Backend:
+  cd backend && venv\Scripts\activate && python main.py
+  → http://localhost:8000 (API docs at /docs)
+
+Frontend:
+  cd frontend && npm run dev
+  → http://localhost:5173
+
+AI features: set LLM_API_KEY in backend/.env
+
+All code is complete implementations (not stubs). The 3D cabinet renders with
+5 body boards, click-to-select works, constraint solver enforces all 12 rules,
+7 Skills handle natural language editing, and the Agent uses OpenAI function
+calling to route intent to Skills with SSE streaming.
+
+============
+
+
