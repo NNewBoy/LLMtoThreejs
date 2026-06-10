@@ -1,21 +1,23 @@
-# 单柜板件级3D编辑器 — 软件规格说明书 (SPEC2)
+# 单柜板件级3D编辑器（Agent + Skills）— 软件规格说明书 (SPEC2)
 
 ## 1. 项目概述
 
 ### 1.1 项目名称
-**CabinetCraft Pro** — 单柜板件级3D在线编辑器
+**CabinetCraft Pro** — 单柜板件级3D在线编辑器（Skills增强版）
 
 ### 1.2 项目目标
-构建一个在线3D柜子编辑器，以**单个柜子**为编辑单元，用户可以在板件/组件级别对柜子进行精细化增删改（如添加隔板、替换门板、加抽屉等），同时支持自然语言指令驱动编辑，实现所见即所得的柜子定制设计。
+构建一个在线3D柜子编辑器，以**单个柜子**为编辑单元，在板件/组件级别进行精细化增删改。后端引入 **LLM Agent + Skills** 架构，将柜子设计领域的操作能力封装为可组合、可复用的技能模块（Skills），Agent 根据用户意图动态选择并编排 Skills，实现更智能、更可靠的自然语言编辑体验。
 
-### 1.3 与 SPEC1 的核心差异
+### 1.3 与前版本的差异
 
-| 维度 | SPEC1 (多柜场景编辑) | SPEC2 (单柜板件编辑) |
-|------|---------------------|---------------------|
-| 编辑粒度 | 整体柜子（位置/尺寸/材质） | 柜子内部板件与组件（侧板/隔板/门板/抽屉） |
-| 前端的职责 | 渲染 + 交互 | 渲染 + 交互 + **编辑逻辑**（板件增删改的核心计算） |
-| 后端的职责 | CRUD + LLM Agent + 业务逻辑 | 数据持久化 + 历史查询 + **LLM Agent** |
-| 核心模型 | 柜子实体 | 板件树/组件树 |
+| 维度 | SPEC1 (Agent版) | SPEC2 (Agent + Skills版) |
+|------|-----------------|--------------------------|
+| Agent 能力组织 | 扁平化工具函数列表 | **分层技能体系**：Skills → Tools |
+| 领域知识注入 | 仅靠 System Prompt | **Skill 内嵌领域规则**（约束、默认值、材质库） |
+| 复杂操作 | 多次工具调用串行 | **Skill 编排**：一个 Skill 可包含多步工具链 |
+| 可扩展性 | 新增工具需改 Agent | **插件化 Skill**：新增设计能力 = 新增 Skill 文件 |
+| 错误恢复 | Agent 自行重试 | **Skill 内置校验与回滚** |
+| 测试粒度 | Agent 集成测试 | Skill 单元测试 + Agent 编排测试 |
 
 ---
 
@@ -28,7 +30,8 @@
 | 3D渲染 | Three.js | WebGL 3D渲染引擎 |
 | 前端状态管理 | Pinia | 柜子板件树状态管理 |
 | 后端框架 | FastAPI (Python 3.10+) | 异步高性能API |
-| AI Agent | DeepAgents | LLM Agent编排与工具调用 |
+| AI Agent | DeepAgents | LLM Agent 编排与工具调用 |
+| Agent Skills | 自定义 Skill 模块 | 领域技能封装（见第10节） |
 | 数据库 | SQLite + SQLAlchemy | 轻量级持久化存储 |
 | LLM | OpenAI API / 兼容接口 | 自然语言理解与生成 |
 
@@ -147,11 +150,12 @@ Cabinet（柜子整体）
 - 撤销/重做：Ctrl+Z / Ctrl+Y，记录每次板件操作的快照
 - 操作历史面板：显示最近操作列表，可跳转到任意历史状态
 
-### 4.2 自然语言编辑 (AI Editor)
+### 4.2 自然语言编辑 (AI Editor + Skills)
 
 #### 4.2.1 对话式编辑
 - **聊天面板**：右侧面板Tab切换至AI对话
-- **意图理解**：LLM解析用户自然语言，识别板件级操作意图：
+- **意图理解**：LLM解析用户自然语言，Agent 自动匹配并调用对应 Skill
+- 意图示例：
   - 添加板件："在柜子中间加一块隔板"
   - 删除板件："把第二块隔板去掉"
   - 修改板件："把左侧板换成深色胡桃木"
@@ -162,34 +166,52 @@ Cabinet（柜子整体）
 - **操作确认**：AI生成操作计划后展示给用户确认
 - **实时反馈**：操作完成后刷新3D视图并给出文字总结
 
-#### 4.2.2 Agent工具链
-DeepAgents Agent具备以下工具（函数调用）：
+#### 4.2.2 Skills 体系（核心新增）
 
-| 工具名称 | 功能 | 参数 |
-|----------|------|------|
-| `add_component` | 添加板件/组件 | cabinet_id, component_type, [position], [size], [material], [color], [style] |
-| `remove_component` | 删除板件/组件 | cabinet_id, component_id |
-| `update_component` | 修改板件属性 | cabinet_id, component_id, 任意修改字段 |
-| `get_cabinet_structure` | 获取柜子完整结构树 | cabinet_id |
-| `get_component` | 获取单个板件详情 | cabinet_id, component_id |
-| `list_components` | 列出某类型所有板件 | cabinet_id, component_type |
-| `update_cabinet_size` | 调整柜体整体尺寸 | cabinet_id, width, height, depth |
-| `undo` / `redo` | 撤销/重做 | cabinet_id |
-| `get_snapshot_description` | 获取柜子结构文字描述（供LLM理解） | cabinet_id |
+Skills 是对柜子设计领域操作的语义化封装，每个 Skill 包含：
+- **Skill 描述**：LLM 用于意图匹配的语义说明
+- **领域规则**：内置的约束条件、默认值、计算公式
+- **工具链**：该 Skill 内部调用的原子工具序列
+- **校验逻辑**：操作前后的合法性检查
+- **回滚策略**：校验失败时的恢复逻辑
 
-#### 4.2.3 AI编辑请求流程
+**Skill 列表：**
+
+| Skill ID | Skill 名称 | 功能描述 | 参数 |
+|----------|-----------|----------|------|
+| `add_shelf` | 添加隔板 | 在指定高度添加一块或多块隔板 | cabinet_id, position_ratios: float[]（0~1相对高度），material?, color? |
+| `add_doors` | 添加门板 | 添加指定数量、样式、覆盖范围的门板 | cabinet_id, count: int, style: str, cover_range: "full"\|"upper"\|"lower", material?, color? |
+| `add_drawers` | 添加抽屉 | 在指定区域添加抽屉组 | cabinet_id, count: int, start_ratio: float, end_ratio: float, style?, material?, color? |
+| `add_backboard` | 添加背板 | 为柜体添加背板 | cabinet_id, material?, color?, thickness? |
+| `add_legs` | 添加柜脚 | 添加底部支撑脚 | cabinet_id, count: int = 4, height: float = 100 |
+| `add_baseboard` | 添加踢脚线 | 添加底部装饰条 | cabinet_id, height: float = 80, material?, color? |
+| `remove_components` | 删除板件 | 按类型或ID删除板件（自动过滤必选板件） | cabinet_id, component_ids?: int[], component_types?: str[] |
+| `change_material` | 批量换材质 | 将指定类型板件的材质统一替换 | cabinet_id, component_types: str[], material: str, color? |
+| `adjust_cabinet_size` | 调整柜体尺寸 | 调整柜体整体尺寸并触发板件连锁更新 | cabinet_id, width?, height?, depth? |
+| `reorganize_layout` | 重新布局 | 复杂结构调整（如"上面两门下面三抽屉"） | cabinet_id, layout_spec: dict |
+| `replace_door_style` | 替换门板样式 | 批量更换门板样式 | cabinet_id, style: str, door_ids?: int[] |
+| `query_structure` | 查询柜子结构 | 获取柜子结构描述和板件统计 | cabinet_id |
+| `balance_shelves` | 均匀分布隔板 | 在柜体内部均匀分布N块隔板 | cabinet_id, count: int, exclude_zones?: list |
+
+**Skill 编排示例：**
+
+用户说"上面加两扇玻璃对开门，下面加三个抽屉"：
 
 ```
-用户输入 → 前端POST /api/ai/chat
-  → 后端获取柜子当前完整结构(get_cabinet_structure作为上下文)
-  → DeepAgents Agent推理 → 调用工具函数
-  → 后端返回操作指令序列(SSE流式)
-  → 前端接收操作指令序列
-  → 前端执行板件的增删改逻辑(约束计算、位置调整)
-  → Three.js刷新视图
+Agent 意图解析 →
+  Skill: reorganize_layout
+    ├── 子调用1: add_doors(count=2, style="glass", cover_range="upper")
+    │     ├── Tool: get_cabinet_structure → 获取柜体现状
+    │     ├── Tool: remove_components(component_types=["door"]) → 清除旧门板
+    │     ├── [计算] 上门区域 = 柜体上半部分
+    │     ├── Tool: add_component × 2 → 创建两扇门板
+    │     └── Tool: add_component → 添加配套拉手
+    ├── 子调用2: add_drawers(count=3, cover_range="lower")
+    │     ├── [计算] 下抽屉区域 = 柜体下半部分
+    │     ├── Tool: add_component × 3 → 创建三个抽屉
+    │     └── Tool: add_component × 3 → 添加配套拉手
+    └── 校验: 门板+抽屉高度之和 ≤ 柜体高度 ✓
 ```
-
-**关键设计**：AI只返回"做什么"的操作指令，实际的板件约束计算、位置尺寸推导由前端完成。
 
 ---
 
@@ -231,13 +253,34 @@ DeepAgents Agent具备以下工具（函数调用）：
 │  └────────┬──────────────────────────────────────┘    │
 │           │                                           │
 │  ┌────────┴─────────┐  ┌────────────────────────┐    │
-│  │  DataService     │  │   DeepAgents            │    │
-│  │  (数据持久化)     │  │   Agent + Tools         │    │
-│  └────────┬─────────┘  └────────────┬───────────┘    │
-│           │                         │                 │
-│  ┌────────┴─────────────────────────┴───────────┐    │
-│  │          SQLAlchemy ORM / SQLite              │    │
-│  └───────────────────────────────────────────────┘    │
+│  │  DataService     │  │   Agent 层               │    │
+│  │  (数据持久化)     │  │  ┌───────────────────┐  │    │
+│  └────────┬─────────┘  │  │  DeepAgents Agent  │  │    │
+│           │            │  │  (意图路由+编排)    │  │    │
+│           │            │  └────────┬──────────┘  │    │
+│           │            │           │              │    │
+│           │            │  ┌────────┴──────────┐  │    │
+│           │            │  │   Skills 层         │  │    │
+│           │            │  │  ┌──────┬──────┐  │  │    │
+│           │            │  │  │Shelf │Door  │  │  │    │
+│           │            │  │  │Skill │Skill  │  │  │    │
+│           │            │  │  ├──────┼──────┤  │  │    │
+│           │            │  │  │Drawer│Layout│  │  │    │
+│           │            │  │  │Skill │Skill  │  │  │    │
+│           │            │  │  ├──────┴──────┤  │  │    │
+│           │            │  │  │  ...更多     │  │  │    │
+│           │            │  │  └────────────┘  │  │    │
+│           │            │  └────────┬──────────┘  │    │
+│           │            │           │              │    │
+│           │            │  ┌────────┴──────────┐  │    │
+│           │            │  │   Tools 层          │  │    │
+│           │            │  │  (原子操作用具)     │  │    │
+│           │            │  └────────────────────┘  │    │
+│           │            └────────────────────────────┘    │
+│           │                         │                   │
+│  ┌────────┴─────────────────────────┴───────────┐      │
+│  │          SQLAlchemy ORM / SQLite              │      │
+│  └───────────────────────────────────────────────┘      │
 └───────────────────────────────────────────────────────┘
 ```
 
@@ -251,9 +294,10 @@ DeepAgents Agent具备以下工具（函数调用）：
 | 板件重叠检测 | ✓ | ✗ |
 | 操作撤销/重做 | ✓（运行时） | ✓（持久化历史） |
 | 数据持久化（保存/加载） | ✗ | ✓ |
-| LLM Agent推理 | ✗ | ✓ |
+| LLM Agent 意图路由 | ✗ | ✓ |
+| Skill 编排与执行 | ✗ | ✓ |
+| Skill 领域规则校验 | ✗ | ✓ |
 | 操作历史记录 | ✗ | ✓ |
-| 工具函数定义与执行 | ✗ | ✓ |
 
 ---
 
@@ -324,6 +368,7 @@ DeepAgents Agent具备以下工具（函数调用）：
 | cabinet_id | INTEGER | FK → cabinets.id, NOT NULL | 所属柜子 |
 | role | VARCHAR(16) | NOT NULL | 角色：user/assistant/system |
 | content | TEXT | NOT NULL | 消息内容 |
+| skill_used | VARCHAR(64) | DEFAULT NULL | 使用的 Skill ID |
 | tool_calls_json | TEXT | DEFAULT NULL | JSON格式的工具调用记录 |
 | created_at | DATETIME | DEFAULT CURRENT_TIMESTAMP | 创建时间 |
 
@@ -365,6 +410,7 @@ DeepAgents Agent具备以下工具（函数调用）：
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | `/api/ai/chat` | 发送自然语言指令（SSE流式响应） |
+| GET | `/api/ai/skills` | 获取可用 Skills 列表及描述 |
 
 **POST /api/ai/chat 请求体：**
 
@@ -379,27 +425,44 @@ DeepAgents Agent具备以下工具（函数调用）：
 }
 ```
 
-**SSE事件流格式：**
+**SSE事件流格式（增强版，含 Skill 信息）：**
 
 ```
 event: thinking
 data: {"content": "正在分析你的需求..."}
 
+event: skill_selected
+data: {"skill_id": "add_shelf", "skill_name": "添加隔板", "reasoning": "用户要求添加隔板"}
+
+event: skill_executing
+data: {"skill_id": "add_shelf", "step": "计算隔板位置", "progress": "1/3"}
+
 event: tool_calls
 data: {"calls": [
   {"tool": "add_component", "args": {"component_type": "shelf", "position_y": 660, ...}},
-  {"tool": "add_component", "args": {"component_type": "shelf", "position_y": 1320, ...}},
+  {"tool": "add_component", "args": {"component_type": "shelf", "position_y": 1320, ...}}
+]}
+
+event: skill_completed
+data: {"skill_id": "add_shelf", "result": "成功添加2块隔板"}
+
+event: skill_selected
+data: {"skill_id": "add_doors", "skill_name": "添加门板", "reasoning": "用户要求添加玻璃门"}
+
+event: tool_calls
+data: {"calls": [
   {"tool": "add_component", "args": {"component_type": "door", "door_style": "glass", ...}}
 ]}
 
+event: skill_completed
+data: {"skill_id": "add_doors", "result": "成功添加2扇玻璃门"}
+
 event: message
-data: {"content": "已添加2块隔板和2扇玻璃门，隔板间距约660mm。"}
+data: {"content": "已完成：添加2块隔板（间距均匀分布），2扇玻璃对开门。"}
 
 event: done
-data: {"cabinet_id": 1, "component_count": 12}
+data: {"cabinet_id": 1, "component_count": 14, "skills_used": ["add_shelf", "add_doors"]}
 ```
-
-**关键设计**：`tool_calls` 事件中返回的是操作指令序列，前端接收后由编辑引擎执行实际的板件创建、约束计算和3D渲染。
 
 ### 7.5 统一响应格式
 
@@ -438,9 +501,9 @@ data: {"cabinet_id": 1, "component_count": 12}
 │   │  └──────────┘ │       │  │                          │  │
 │   │  底板          │       │  │  AI对话模式:             │  │
 │   └──────────────┘       │  │  - 消息列表              │  │
-│                          │  │  - 输入框                 │  │
+│                          │  │  - Skill 执行进度卡片     │  │
 │  工具栏:                  │  │  - 操作确认卡片          │  │
-│  [爆炸] [透视] [重置视角]  │  │                          │  │
+│  [爆炸] [透视] [重置视角]  │  │  - 输入框                 │  │
 │                          │  └─────────────────────────┘  │
 ├──────────────────────────┴───────────────────────────────┤
 │  底部状态栏: 板件数量 | 柜体尺寸 | 材质 | FPS             │
@@ -472,7 +535,8 @@ App.vue
 │   │   │   └── AddComponentPanel.vue # 添加板件按钮组
 │   │   └── AITab.vue            # AI对话Tab
 │   │       ├── ChatMessages.vue
-│   │       ├── OperationConfirm.vue  # 操作确认卡片
+│   │       ├── SkillProgressCard.vue  # Skill执行进度（新增）
+│   │       ├── OperationConfirm.vue   # 操作确认卡片
 │   │       └── ChatInput.vue
 │   └── StatusBar.vue            # 底部状态栏
 └── ConfirmDialog.vue            # 通用确认对话框
@@ -486,8 +550,8 @@ class ConstraintSolver {
   /** 根据柜体尺寸计算必选板件位置 */
   static computeBodyBoards(cabinet: CabinetSize): BoardPlacement[]
 
-  /** 计算新隔板的默认位置（在可用空间居中） */
-  static computeShelfPlacement(cabinet: CabinetData, targetY?: number): BoardPlacement
+  /** 计算新隔板的默认位置（在可用空间居中或均匀分布） */
+  static computeShelfPlacement(cabinet: CabinetData, targetY?: number, count?: number): BoardPlacement[]
 
   /** 计算门板的默认尺寸（适配柜体正面） */
   static computeDoorPlacement(cabinet: CabinetData, count: number, style: DoorStyle): BoardPlacement[]
@@ -553,6 +617,7 @@ interface CabinetStore {
 interface ChatStore {
   messages: ChatMessage[]
   isStreaming: boolean
+  currentSkill: { skillId: string; skillName: string; progress: string } | null
   pendingOperations: AIOperation[] | null    // 待确认的操作
 
   sendMessage(cabinetId: number, text: string): Promise<void>
@@ -614,15 +679,32 @@ backend/
 ├── agent/
 │   ├── __init__.py
 │   ├── agent.py                # DeepAgents Agent定义
-│   ├── tools.py                # Agent工具函数定义
-│   └── prompts.py              # System Prompt模板
+│   ├── tools.py                # Agent原子工具函数定义
+│   ├── prompts.py              # System Prompt模板
+│   └── skill_registry.py       # Skill注册中心（新增）
+├── skills/                     # Skills模块（新增）
+│   ├── __init__.py
+│   ├── base.py                 # Skill基类 + SkillResult
+│   ├── shelf_skill.py          # 隔板相关Skills
+│   ├── door_skill.py           # 门板相关Skills
+│   ├── drawer_skill.py         # 抽屉相关Skills
+│   ├── layout_skill.py         # 布局调整Skills
+│   ├── material_skill.py       # 材质/样式Skills
+│   ├── query_skill.py          # 查询Skills
+│   └── resize_skill.py         # 尺寸调整Skills
 └── tests/
     ├── __init__.py
     ├── conftest.py             # Pytest fixtures (测试数据库)
     ├── test_cabinets.py
     ├── test_components.py
     ├── test_history.py
-    └── test_ai.py
+    ├── test_ai.py
+    └── test_skills/            # Skills单元测试（新增）
+        ├── __init__.py
+        ├── test_shelf_skill.py
+        ├── test_door_skill.py
+        ├── test_drawer_skill.py
+        └── test_layout_skill.py
 ```
 
 ### 9.2 CabinetService
@@ -682,10 +764,11 @@ class ComponentService:
 from deepagents import Agent
 
 class CabinetAgent:
-    def __init__(self, llm_client, tools: list):
+    def __init__(self, llm_client, skill_registry: SkillRegistry):
+        self.skill_registry = skill_registry
         self.agent = Agent(
             model=llm_client,
-            tools=tools,
+            tools=skill_registry.get_all_skill_tools(),  # 注册 Skills 暴露的工具入口
             system_prompt=SYSTEM_PROMPT
         )
 
@@ -695,451 +778,530 @@ class CabinetAgent:
         message: str,
         history: list[dict]
     ) -> AsyncGenerator[str, None]:
-        """流式对话，生成SSE事件"""
+        """流式对话，生成SSE事件（含 skill_selected / skill_executing / skill_completed 事件）"""
 ```
 
-```python
-# agent/prompts.py
-SYSTEM_PROMPT = """
-你是一个柜子板件级3D编辑助手。用户会通过自然语言描述想对柜子内部结构进行的修改。
+### 9.5 Agent 原子工具层 (Tools)
 
-你需要理解用户的意图，并调用合适的工具来生成操作指令。
+工具层提供原子操作函数，被 Skills 调用：
 
-## 柜子结构说明
-- 一个柜子由多种板件组成：顶板、底板、左侧板、右侧板、背板（必选）、隔板、门板、抽屉等
-- 坐标原点在柜体几何中心，(0,0,0)
-- X轴=宽度方向，Y轴=高度方向，Z轴=深度方向
-- 尺寸单位：毫米(mm)
-
-## 板件类型
-- top_board: 顶板（必选，不可删除）
-- bottom_board: 底板（必选，不可删除）
-- left_board: 左侧板（必选，不可删除）
-- right_board: 右侧板（必选，不可删除）
-- back_board: 背板
-- shelf: 隔板
-- door: 门板
-- drawer: 抽屉
-- handle: 拉手
-- leg: 柜脚
-- baseboard: 踢脚线
-
-## 操作规则
-1. 不要删除必选板件（顶板、底板、左侧板、右侧板）
-2. 添加板件前，先调用 get_cabinet_structure 了解当前柜子结构
-3. 添加板件时，给出合理的位置和尺寸参数。如果用户没有指定具体数值，使用合理的默认值
-4. 隔板和抽屉的默认位置应避免与已有板件重叠
-5. 门板的默认尺寸应适配柜体正面
-6. 用户说"中间"时，Y坐标取柜体高度的一半
-7. 用户说"上面/顶部"时，Y坐标靠近顶板下方
-8. 用户说"下面/底部"时，Y坐标靠近底板上方
-9. 板件厚度默认为18mm
-10. 背板厚度默认为5mm
-
-## 回复要求
-- 操作完成后，用简洁的中文总结做了什么
-- 如果用户指令不明确，先询问澄清而不是猜测
-"""
-```
-
-### 9.5 Agent 工具函数
-
-```python
-# agent/tools.py
-@tool
-async def get_cabinet_structure(cabinet_id: int) -> str:
-    """获取柜子完整板件结构，返回JSON格式的板件列表，供AI理解当前状态"""
-    ...
-
-@tool
-async def add_component(
-    cabinet_id: int,
-    component_type: str,
-    position_y: float = None,
-    position_x: float = None,
-    position_z: float = None,
-    width: float = None,
-    height: float = None,
-    depth: float = None,
-    material: str = None,
-    color: str = None,
-    door_style: str = None,
-    handle_style: str = None,
-    count: int = 1
-) -> str:
-    """生成添加板件的操作指令"""
-    ...
-
-@tool
-async def remove_component(cabinet_id: int, component_id: int) -> str:
-    """生成删除板件的操作指令"""
-    ...
-
-@tool
-async def update_component(
-    cabinet_id: int,
-    component_id: int,
-    material: str = None,
-    color: str = None,
-    door_style: str = None,
-    handle_style: str = None,
-    position_y: float = None,
-    width: float = None,
-    height: float = None,
-    depth: float = None
-) -> str:
-    """生成修改板件属性的操作指令"""
-    ...
-
-@tool
-async def update_cabinet_size(
-    cabinet_id: int,
-    width: float = None,
-    height: float = None,
-    depth: float = None
-) -> str:
-    """生成调整柜体尺寸的操作指令"""
-    ...
-
-@tool
-async def list_components(cabinet_id: int, component_type: str = None) -> str:
-    """列出柜子中指定类型的所有板件"""
-    ...
-```
+| 工具名称 | 功能 | 参数 |
+|----------|------|------|
+| `add_component` | 添加板件/组件 | cabinet_id, component_type, [position], [size], [material], [color], [style] |
+| `remove_component` | 删除板件/组件 | cabinet_id, component_id |
+| `update_component` | 修改板件属性 | cabinet_id, component_id, 任意修改字段 |
+| `get_cabinet_structure` | 获取柜子完整结构树 | cabinet_id |
+| `get_component` | 获取单个板件详情 | cabinet_id, component_id |
+| `list_components` | 列出某类型所有板件 | cabinet_id, component_type |
+| `update_cabinet_size` | 调整柜体整体尺寸 | cabinet_id, width, height, depth |
+| `undo` / `redo` | 撤销/重做 | cabinet_id |
+| `get_snapshot_description` | 获取柜子结构文字描述（供LLM理解） | cabinet_id |
 
 ---
 
-## 10. 交互流程
+## 10. Skills 体系详细设计（核心新增）
 
-### 10.1 可视化编辑流程
+### 10.1 Skill 基类设计
 
+```python
+# skills/base.py
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from typing import Any, Optional
+
+@dataclass
+class SkillResult:
+    """Skill 执行结果"""
+    success: bool
+    message: str                          # 用户可读的执行描述
+    operations: list[dict]                # 返回给前端的操作指令序列
+    error: Optional[str] = None
+
+class BaseSkill(ABC):
+    """所有 Skill 的抽象基类"""
+
+    skill_id: str                         # 唯一标识
+    skill_name: str                       # 中文名称
+    description: str                      # 功能描述（给LLM做意图匹配）
+    examples: list[str]                   # 触发该 Skill 的自然语言示例
+
+    def __init__(self, tools: dict):
+        """
+        tools: 原子工具函数字典，如 {'add_component': func, 'get_cabinet_structure': func, ...}
+        """
+        self.tools = tools
+
+    @abstractmethod
+    def can_handle(self, intent: str, context: dict) -> bool:
+        """判断该 Skill 是否能处理当前意图"""
+        ...
+
+    @abstractmethod
+    async def execute(self, cabinet_id: int, params: dict, context: dict) -> SkillResult:
+        """执行该 Skill，返回操作指令序列"""
+        ...
+
+    async def pre_check(self, cabinet_id: int, params: dict) -> bool:
+        """执行前校验（可选覆写）"""
+        return True
+
+    async def post_check(self, cabinet_id: int, result: SkillResult) -> bool:
+        """执行后校验（可选覆写）"""
+        return True
+
+    async def rollback(self, cabinet_id: int, params: dict) -> None:
+        """回滚操作（可选覆写）"""
+        pass
 ```
-用户打开/创建柜子
-  → GET /api/cabinets/{id} 获取柜子 + 所有板件
-  → BoardFactory 为每块板件创建 Three.js Mesh
-  → 渲染完整柜子3D模型
 
-用户点击"添加隔板"
-  → ConstraintSolver.computeShelfPlacement() 计算默认位置
-  → BoardFactory.create('shelf', ...) 创建板件数据
-  → BoardFactory.createMesh() 创建Mesh添加到场景
-  → SnapshotManager.takeSnapshot() 记录快照
-  → POST /api/cabinets/{id}/components 持久化
+### 10.2 Skill 实现示例
 
-用户选中隔板
-  → Raycaster 检测点击
-  → OutlineEffect 高亮选中
-  → 右侧面板显示属性编辑器
+#### ShelfSkill（隔板操作）
 
-用户拖动隔板高度滑块
-  → ConstraintSolver 验证新位置不越界
-  → 更新 component.position_y
-  → BoardFactory.updateMesh() 更新Mesh位置
-  → 实时 3D 预览（防抖200ms后才持久化）
-
-用户修改材质
-  → 更新 component.material
-  → BoardFactory.updateMesh() 替换材质
-  → PUT /api/cabinets/{id}/components/{cid} 持久化
-
-用户删除隔板
-  → ConfirmDialog 确认
-  → SnapshotManager.takeSnapshot()
-  → 从场景移除Mesh
-  → DELETE /api/cabinets/{id}/components/{cid}
-
-用户撤销 (Ctrl+Z)
-  → SnapshotManager.undo()
-  → 根据快照重建板件列表和3D场景
-```
-
-### 10.2 AI对话编辑流程
-
-```
-用户输入: "在柜子中间加一块玻璃隔板，上面装两扇白色烤漆门"
-
-前端:
-  → POST /api/ai/chat { cabinet_id, message, history } (SSE)
-
-后端:
-  → get_cabinet_structure(cabinet_id) 获取当前板件结构注入上下文
-  → Agent推理:
-     1. 柜子高2000mm，中间约1000mm处
-     2. 内部宽度 = 柜宽 - 左右板厚度 = 800-18-18 = 764mm
-     3. 隔板: shelf, Y=1000, 玻璃材质
-     4. 门板: 2扇, 覆盖上半部分(Y=1000到2000), 白色烤漆
-  → SSE: thinking → "正在分析柜子结构并规划操作..."
-  → SSE: tool_calls → [
-      {tool: "add_component", args: {type:"shelf", position_y:1000, material:"glass"}},
-      {tool: "add_component", args: {type:"door", count:2, position_y:1000, height:982, material:"paint_white"}}
+```python
+# skills/shelf_skill.py
+class ShelfSkill(BaseSkill):
+    skill_id = "add_shelf"
+    skill_name = "添加隔板"
+    description = "在柜体内部指定位置添加活动隔板，支持单块或多块均匀分布"
+    examples = [
+        "加一块隔板",
+        "在柜子中间加一块隔板",
+        "加三块均匀分布的隔板",
+        "在高度60厘米处加一块隔板"
     ]
-  → SSE: message → "已添加玻璃隔板(高1000mm处)和2扇白色烤漆门"
-  → SSE: done
 
-前端:
-  → 接收 tool_calls → 展示操作确认卡片
-  → 用户点击"确认"
-  → 前端编辑引擎逐条执行:
-      1. ConstraintSolver 计算隔板精确位置和尺寸
-      2. BoardFactory 创建隔板Mesh
-      3. ConstraintSolver 计算门板尺寸(需减去隔板厚度)
-      4. BoardFactory 创建2扇门板Mesh
-  → SnapshotManager 记录快照
-  → POST /api/cabinets/{id}/components 批量持久化
-  → 3D视图更新完成
+    # 领域规则
+    MIN_SHELF_SPACING = 150    # 最小隔板间距(mm)
+    DEFAULT_THICKNESS = 18     # 默认隔板厚度(mm)
+
+    async def execute(self, cabinet_id: int, params: dict, context: dict) -> SkillResult:
+        cabinet = await self.tools['get_cabinet_structure'](cabinet_id)
+        internal_space = self._calc_internal_space(cabinet)
+
+        count = params.get('count', 1)
+        target_ratios = params.get('position_ratios', None)
+
+        if target_ratios is None:
+            # 均匀分布
+            target_ratios = [i / (count + 1) for i in range(1, count + 1)]
+
+        operations = []
+        existing_shelves = [c for c in cabinet['components']
+                           if c['component_type'] == 'shelf']
+
+        for ratio in target_ratios:
+            y_pos = internal_space['y_min'] + ratio * internal_space['y_range']
+            # 碰撞检测
+            if self._would_overlap(y_pos, existing_shelves, self.MIN_SHELF_SPACING):
+                continue
+
+            op = self.tools['add_component'].to_operation(
+                cabinet_id=cabinet_id,
+                component_type='shelf',
+                position_y=y_pos,
+                width=internal_space['width'],
+                depth=internal_space['depth'],
+                height=self.DEFAULT_THICKNESS,
+                material=params.get('material'),
+                color=params.get('color')
+            )
+            operations.append(op)
+            existing_shelves.append({'position_y': y_pos})
+
+        return SkillResult(
+            success=True,
+            message=f"已添加 {len(operations)} 块隔板",
+            operations=operations
+        )
 ```
 
-### 10.3 保存/加载流程
+#### DoorSkill（门板操作）
+
+```python
+# skills/door_skill.py
+class DoorSkill(BaseSkill):
+    skill_id = "add_doors"
+    skill_name = "添加门板"
+    description = "添加柜门。支持指定数量、样式（平板/造型/玻璃/百叶）、覆盖范围（全高/上半/下半）"
+    examples = [
+        "加两扇门",
+        "加一扇玻璃门",
+        "上面加两扇对开门",
+        "换成平板门"
+    ]
+
+    # 领域规则
+    VALID_STYLES = ['flat', 'panel', 'glass', 'louver']
+    DOOR_GAP = 3                # 门缝(mm)
+    DEFAULT_HANDLE = 'long'     # 默认拉手样式
+
+    async def execute(self, cabinet_id: int, params: dict, context: dict) -> SkillResult:
+        cabinet = await self.tools['get_cabinet_structure'](cabinet_id)
+        count = params.get('count', 1)
+        style = params.get('style', 'flat')
+        cover_range = params.get('cover_range', 'full')  # full | upper | lower
+
+        if style not in self.VALID_STYLES:
+            return SkillResult(success=False, message=f"不支持的门板样式: {style}",
+                             operations=[], error="invalid_style")
+
+        # 计算门板区域
+        door_zone = self._calc_door_zone(cabinet, cover_range)
+        door_width = (cabinet['width'] - (count - 1) * self.DOOR_GAP) / count
+
+        operations = []
+        # 先删除旧门板及其关联拉手
+        existing_doors = [c for c in cabinet['components'] if c['component_type'] == 'door']
+        for door in existing_doors:
+            operations.append(self.tools['remove_component'].to_operation(
+                cabinet_id=cabinet_id, component_id=door['id']
+            ))
+
+        # 创建新门板
+        for i in range(count):
+            x_pos = -cabinet['width'] / 2 + door_width / 2 + i * (door_width + self.DOOR_GAP)
+            op = self.tools['add_component'].to_operation(
+                cabinet_id=cabinet_id,
+                component_type='door',
+                position_x=x_pos,
+                position_y=door_zone['y_center'],
+                position_z=cabinet['depth'] / 2 + 2,  # 门板在柜体前方
+                width=door_width,
+                height=door_zone['height'],
+                depth=2,  # 门板厚度2mm（3D显示用）
+                door_style=style,
+                material=params.get('material'),
+                color=params.get('color')
+            )
+            operations.append(op)
+
+            # 添加拉手
+            handle_op = self.tools['add_component'].to_operation(
+                cabinet_id=cabinet_id,
+                component_type='handle',
+                parent_component_index=len(operations) - 1,
+                handle_style=params.get('handle_style', self.DEFAULT_HANDLE)
+            )
+            operations.append(handle_op)
+
+        return SkillResult(
+            success=True,
+            message=f"已添加 {count} 扇{style_zh[style]}门板",
+            operations=operations
+        )
+```
+
+#### ReorganizeLayoutSkill（布局重排）
+
+```python
+# skills/layout_skill.py
+class ReorganizeLayoutSkill(BaseSkill):
+    skill_id = "reorganize_layout"
+    skill_name = "重新布局"
+    description = "对柜子进行复杂结构调整，如'上面两门下面三抽屉'。自动编排子Skills完成整体布局。"
+    examples = [
+        "上面加两扇对开门，下面加三个抽屉",
+        "重新布局：上半部玻璃门，下半部两个大抽屉",
+    ]
+
+    async def execute(self, cabinet_id: int, params: dict, context: dict) -> SkillResult:
+        layout = params['layout_spec']  # 如前端/AI解析的结构化布局描述
+        all_operations = []
+
+        for zone in layout['zones']:
+            sub_skill = self._resolve_sub_skill(zone['type'])
+            if sub_skill:
+                sub_params = self._build_sub_params(zone)
+                result = await sub_skill.execute(cabinet_id, sub_params, context)
+                all_operations.extend(result.operations)
+
+        return SkillResult(
+            success=True,
+            message=f"布局调整完成",
+            operations=all_operations
+        )
+
+    def _resolve_sub_skill(self, zone_type: str) -> BaseSkill:
+        """根据区域类型解析对应 Skill"""
+        mapping = {
+            'door': DoorSkill,
+            'drawer': DrawerSkill,
+            'shelf': ShelfSkill,
+        }
+        skill_cls = mapping.get(zone_type)
+        return skill_cls(self.tools) if skill_cls else None
+```
+
+### 10.3 Skill 注册中心
+
+```python
+# agent/skill_registry.py
+class SkillRegistry:
+    """Skills 注册中心 — 管理所有 Skill 的注册、发现与调用"""
+
+    def __init__(self, tools: dict):
+        self.tools = tools
+        self._skills: dict[str, BaseSkill] = {}
+
+    def register(self, skill: BaseSkill) -> None:
+        """注册一个 Skill"""
+        self._skills[skill.skill_id] = skill
+
+    def get(self, skill_id: str) -> Optional[BaseSkill]:
+        """按 ID 获取 Skill"""
+        return self._skills.get(skill_id)
+
+    def list_all(self) -> list[dict]:
+        """获取所有 Skill 的元信息（供前端展示和LLM路由）"""
+        return [
+            {
+                "skill_id": s.skill_id,
+                "skill_name": s.skill_name,
+                "description": s.description,
+                "examples": s.examples,
+            }
+            for s in self._skills.values()
+        ]
+
+    def get_skill_descriptions_for_prompt(self) -> str:
+        """生成注入到 System Prompt 的 Skills 描述文本"""
+        lines = []
+        for s in self._skills.values():
+            lines.append(f"- {s.skill_id}: {s.description}")
+            lines.append(f"  触发示例: {'; '.join(s.examples[:3])}")
+        return "\n".join(lines)
+
+    def match_skill(self, intent: str, context: dict) -> Optional[BaseSkill]:
+        """根据用户意图匹配最合适的 Skill（由LLM通过function call选择）"""
+        # 实际匹配由 LLM 根据 Skill 描述完成，此处为兜底逻辑
+        for skill in self._skills.values():
+            if skill.can_handle(intent, context):
+                return skill
+        return None
+
+    def get_all_skill_tools(self) -> list:
+        """获取注册给 DeepAgents Agent 的所有 Skill 入口工具"""
+        # 每个 Skill 暴露为一个 Agent Tool（function call）
+        return [self._build_skill_tool_schema(s) for s in self._skills.values()]
+
+    def _build_skill_tool_schema(self, skill: BaseSkill) -> dict:
+        """将 Skill 转换为 Agent 可调用的工具定义"""
+        return {
+            "type": "function",
+            "function": {
+                "name": skill.skill_id,
+                "description": skill.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "cabinet_id": {"type": "integer"},
+                        "params": {"type": "object"},
+                    },
+                    "required": ["cabinet_id", "params"],
+                },
+            },
+        }
+```
+
+### 10.4 Skills 执行流程
 
 ```
-保存:
-  用户点击保存
-  → 前端收集当前 cabinet + components 状态
-  → PUT /api/cabinets/{id} 更新柜子元数据
-  → PUT /api/cabinets/{id}/components/batch 批量更新板件
-  → POST /api/cabinets/{id}/history 保存操作快照
-  → 提示保存成功
+用户输入自然语言
+       │
+       ▼
+┌──────────────────┐
+│  Agent 接收消息    │
+│  + 当前柜子上下文  │
+│  + 对话历史       │
+│  + Skills 描述    │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│  LLM 意图分析     │
+│  选择 Skill(s)   │
+└────────┬─────────┘
+         │
+         ▼  SSE: skill_selected
+┌──────────────────┐
+│  Skill.execute() │
+│  ├── pre_check   │
+│  ├── 领域规则计算  │
+│  ├── 调用 Tools   │
+│  ├── post_check  │
+│  └── 生成操作序列  │
+└────────┬─────────┘
+         │
+         ▼  SSE: tool_calls + skill_completed
+┌──────────────────┐
+│  返回操作指令序列  │
+│  (SSE 流式)      │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│  前端编辑引擎     │
+│  执行操作指令     │
+│  + 约束求解      │
+│  + 3D 视图刷新   │
+└──────────────────┘
+```
 
-加载:
-  用户从列表选择柜子
-  → GET /api/cabinets/{id} 获取柜子数据 + 板件列表
-  → 前端重建 Three.js 场景
-  → SnapshotManager 清空undo/redo栈
+### 10.5 Skills 与 Agent 协作模式
+
+**模式一：单一 Skill 调用**
+用户意图明确匹配单个 Skill → Agent 直接调用 Skill 入口 → Skill 内部编排多步 Tool 调用。
+
+```
+用户："在中间加一块隔板"
+  → Agent 选择: add_shelf(count=1, position_ratios=[0.5])
+    → Skill 内部: get_cabinet_structure → 计算位置 → add_component
+```
+
+**模式二：多 Skill 串联**
+用户意图复杂，需多个 Skill 顺序执行 → Agent 编排 Skill 调用链。
+
+```
+用户："上面加两扇玻璃门，下面加三个抽屉"
+  → Agent 选择: [add_doors, add_drawers]
+    → add_doors(count=2, style="glass", cover_range="upper")
+    → add_drawers(count=3, cover_range="lower")
+```
+
+**模式三：Skill 嵌套**
+高层 Skill 内部编排多个子 Skill 完成复杂任务。
+
+```
+用户："重新布局，上面两个玻璃对开门，下面两个大抽屉"
+  → Agent 选择: reorganize_layout(layout_spec={...})
+    → Skill 内部:
+      → sub: add_doors(count=2, style="glass", cover_range="upper")
+      → sub: add_drawers(count=2, cover_range="lower")
 ```
 
 ---
 
-## 11. 错误处理
+## 11. 测试策略
 
-### 11.1 后端错误码
+### 11.1 测试层级
 
-| 错误码 | HTTP状态码 | 说明 |
-|--------|-----------|------|
-| CABINET_NOT_FOUND | 404 | 柜子不存在 |
-| COMPONENT_NOT_FOUND | 404 | 板件不存在 |
-| COMPONENT_REQUIRED | 403 | 该板件为必选板件，不可删除 |
-| INVALID_PARAMS | 400 | 参数校验失败 |
-| INVALID_COMPONENT_TYPE | 400 | 无效的板件类型 |
-| SIZE_OUT_OF_RANGE | 400 | 尺寸超出合理范围 |
-| AI_SERVICE_ERROR | 500 | AI服务调用失败 |
-| AI_TIMEOUT | 504 | AI服务响应超时 |
+| 层级 | 测试内容 | 工具 | 覆盖率目标 |
+|------|----------|------|-----------|
+| 单元测试 - Skills | 每个 Skill 的独立逻辑、领域规则、边界条件 | pytest | ≥ 90% |
+| 单元测试 - Services | CRUD 数据服务 | pytest + SQLite in-memory | ≥ 85% |
+| 单元测试 - 前端编辑引擎 | 约束求解器、板件工厂、快照管理 | Vitest | ≥ 85% |
+| 集成测试 - API | FastAPI 路由端到端测试 | pytest + httpx | ≥ 80% |
+| 集成测试 - Agent | Agent + Skills 编排的正确性 | pytest + mock LLM | ≥ 80% |
+| E2E测试 | 前端完整用户流程 | Playwright | 核心流程覆盖 |
 
-### 11.2 前端错误处理
+### 11.2 Skill 单元测试示例
 
-- API调用失败：Toast通知，保留本地修改状态
-- AI流式响应中断：显示已接收的操作指令，用户可选择执行或放弃
-- 3D渲染异常：显示降级提示"3D渲染异常，请刷新页面"
-- 约束冲突：面板上红框提示冲突参数，阻止提交
-- 网络断开：自动保存到 localStorage，恢复连接后提示同步
+```python
+# tests/test_skills/test_shelf_skill.py
+class TestShelfSkill:
+    async def test_add_single_shelf_middle(self, tools, cabinet):
+        skill = ShelfSkill(tools)
+        result = await skill.execute(
+            cabinet_id=cabinet.id,
+            params={'count': 1, 'position_ratios': [0.5]},
+            context={}
+        )
+        assert result.success
+        assert len(result.operations) == 1
+        assert result.operations[0]['component_type'] == 'shelf'
+        # 验证隔板位于柜体中间
+        expected_y = cabinet.height / 2
+        assert abs(result.operations[0]['position_y'] - expected_y) < 1
 
----
+    async def test_add_multiple_shelves_uniform(self, tools, cabinet):
+        skill = ShelfSkill(tools)
+        result = await skill.execute(
+            cabinet_id=cabinet.id,
+            params={'count': 3},
+            context={}
+        )
+        assert result.success
+        assert len(result.operations) == 3
 
-## 12. 测试策略
-
-### 12.1 前端单元测试（Vitest）
-
-| 测试模块 | 测试内容 |
-|----------|----------|
-| `ConstraintSolver.test.ts` | 必选板件位置计算、隔板默认位置、门板尺寸计算、空间重叠检测 |
-| `BoardFactory.test.ts` | 板件数据创建正确性、Mesh生成参数正确性 |
-| `SnapshotManager.test.ts` | 快照创建、撤销、重做、栈边界 |
-| `CabinetStore.test.ts` | 增删改状态变更、选中切换、AI操作应用 |
-| 组件测试 | 属性面板渲染、板件列表树显示、操作按钮状态 |
-
-### 12.2 后端单元测试（pytest）
-
-| 测试模块 | 测试内容 |
-|----------|----------|
-| `test_cabinets.py` | 柜子CRUD接口、默认板件初始化、级联删除 |
-| `test_components.py` | 板件CRUD接口、必选板件删除校验、批量替换 |
-| `test_history.py` | 操作历史记录、快照保存/恢复 |
-| `test_ai.py` | Mock LLM → 验证SSE事件格式、工具调用参数正确性 |
-| `test_agent_tools.py` | 各工具函数的输入输出正确性 |
-
-### 12.3 集成测试
-
-- 前后端联调：创建柜子 → 添加板件 → 保存 → 加载验证一致性
-- AI完整流程：发送指令 → 接收tool_calls → 前端执行 → 持久化 → 加载验证
-
----
-
-## 13. 开发环境与运行
-
-### 13.1 前端
-
-```bash
-cd frontend
-npm install
-npm run dev            # http://localhost:5173
-npm run build
-npm run test
-npm run test:coverage  # 覆盖率报告
+    async def test_shelf_collision_detection(self, tools, cabinet_with_shelves):
+        """已有一块隔板在中间，再添加时应跳过重叠位置"""
+        skill = ShelfSkill(tools)
+        result = await skill.execute(
+            cabinet_id=cabinet_with_shelves.id,
+            params={'count': 1, 'position_ratios': [0.5]},  # 与已有隔板重叠
+            context={}
+        )
+        assert len(result.operations) == 0  # 重叠，跳过
 ```
 
-### 13.2 后端
+### 11.3 Agent 编排测试示例
 
-```bash
-cd backend
-python -m venv venv
-venv\Scripts\activate   # Windows
-pip install -r requirements.txt
-uvicorn main:app --reload  # http://localhost:8000
-pytest -v --cov=.       # 测试 + 覆盖率
-```
+```python
+# tests/test_ai.py
+class TestAgentSkillOrchestration:
+    async def test_agent_routes_to_add_shelf(self, agent, cabinet):
+        response = await agent.chat(cabinet.id, "在柜子中间加一块隔板")
+        assert "add_shelf" in response.skills_used
+        assert any(op['component_type'] == 'shelf' for op in response.operations)
 
-### 13.3 依赖清单
-
-**前端 (package.json)**
-
-```json
-{
-  "dependencies": {
-    "vue": "^3.4",
-    "pinia": "^2.1",
-    "three": "^0.168",
-    "axios": "^1.7"
-  },
-  "devDependencies": {
-    "vite": "^5.4",
-    "typescript": "^5.5",
-    "@vitejs/plugin-vue": "^5.1",
-    "vitest": "^2.0",
-    "@vue/test-utils": "^2.4"
-  }
-}
-```
-
-**后端 (requirements.txt)**
-
-```
-fastapi==0.112.*
-uvicorn[standard]==0.30.*
-sqlalchemy==2.0.*
-pydantic==2.*
-deepagents==0.*
-httpx==0.27.*
-pytest==8.*
-pytest-cov==5.*
-pytest-asyncio==0.24.*
-```
-
-### 13.4 环境变量
-
-```
-OPENAI_API_KEY=sk-xxx
-OPENAI_BASE_URL=https://api.openai.com/v1   # 可选，兼容接口
-DATABASE_URL=sqlite:///./cabinet_craft.db
+    async def test_agent_orchestrates_multi_skills(self, agent, cabinet):
+        response = await agent.chat(cabinet.id, "上面加两扇玻璃门，下面加三个抽屉")
+        assert set(response.skills_used) == {'add_doors', 'add_drawers'}
+        door_ops = [op for op in response.operations if op['component_type'] == 'door']
+        drawer_ops = [op for op in response.operations if op['component_type'] == 'drawer']
+        assert len(door_ops) >= 2  # 至少2扇门（含拉手可能更多op）
+        assert len(drawer_ops) >= 3
 ```
 
 ---
 
-## 14. 版本规划
+## 12. 开发阶段规划
 
-### V1.0 — MVP
-- 单柜基础板件结构（顶/底/左/右/背板 + 默认隔板/门板）
-- 可视化编辑面板（增删改板件）
-- 前端约束求解器（基础规则）
-- AI对话编辑（添加/删除/修改板件）
-- 撤销/重做
-- 保存/加载
-
-### V1.1 — 功能增强
-- 抽屉组件完整支持（含滑轨动画）
-- 板件纹理贴图上传
-- 爆炸视图动画
-- 孔位/连接件显示
-- 导出设计参数表（Excel/PDF）
-- 柜子模板市场
-
-### V1.2 — 进阶
-- 多柜组合编辑
-- 真实五金件模型
-- AR预览
-- 报价单生成
-- 对接生产系统（导出CNC数据）
+| 阶段 | 内容 | 里程碑 |
+|------|------|--------|
+| Phase 1: 基础框架 | 前后端项目骨架搭建、数据库初始化、Three.js 基础渲染 | 能看到默认柜子3D模型 |
+| Phase 2: 编辑引擎 | 约束求解器、板件增删改、面板UI、操作历史 | 可视化编辑柜子板件 |
+| Phase 3: AI基础 | DeepAgents Agent 接入、基础工具函数、SSE对话流 | 自然语言完成简单编辑 |
+| Phase 4: Skills体系 | Skill 基类、Shelf/Door/Drawer Skill 实现、Skill 注册中心 | 自然语言完成结构化编辑 |
+| Phase 5: 高级Skills | Layout/Material/Resize Skill、多Skill编排 | AI处理复杂意图 |
+| Phase 6: 测试完善 | Skill单元测试、Agent编排测试、前端约束求解测试、E2E | 测试覆盖率达标 |
+| Phase 7: 优化上线 | 性能优化、错误处理、UX打磨 | 可演示的完整产品 |
 
 ---
 
-## 附录 A：默认柜体初始化板件参数
+## 13. 附录
 
-创建新柜子（默认 宽800 × 高2000 × 深500，板厚18mm）时，前端自动生成以下板件：
+### 13.1 材质库
 
-| 板件类型 | 宽度(mm) | 高度(mm) | 深度(mm) | Y偏移 | 材质 | 备注 |
-|----------|----------|----------|----------|-------|------|------|
-| top_board | 800 | 18 | 500 | +991 | wood_oak | 顶板 |
-| bottom_board | 800 | 18 | 500 | -991 | wood_oak | 底板 |
-| left_board | 18 | 1964 | 500 | 0 | wood_oak | 左侧板(高=2000-18-18) |
-| right_board | 18 | 1964 | 500 | 0 | wood_oak | 右侧板 |
-| back_board | 764 | 1964 | 5 | 0 | wood_oak | 背板(宽=800-18-18, 厚5mm) |
-| door[0] | 382 | 1964 | 18 | 0 | wood_oak | 左门板 |
-| door[1] | 382 | 1964 | 18 | 0 | wood_oak | 右门板 |
-| handle[0] | - | - | - | - | metal_steel | 左门拉手(关联door[0]) |
-| handle[1] | - | - | - | - | metal_steel | 右门拉手(关联door[1]) |
+| 材质ID | 中文名 | 颜色基准 | 说明 |
+|--------|--------|----------|------|
+| `wood_oak` | 橡木 | #C49A6C | 浅色木纹 |
+| `wood_walnut` | 胡桃木 | #5C3A21 | 深色木纹 |
+| `wood_maple` | 枫木 | #E8C99B | 浅黄色木纹 |
+| `wood_cherry` | 樱桃木 | #8B4513 | 红棕色木纹 |
+| `paint_white` | 白色烤漆 | #FFFFFF | 高光白色 |
+| `paint_black` | 黑色烤漆 | #1A1A1A | 哑光黑色 |
+| `paint_grey` | 灰色烤漆 | #808080 | 中灰色 |
+| `paint_navy` | 深蓝烤漆 | #1B2838 | 深蓝色 |
+| `metal_steel` | 不锈钢 | #C0C0C0 | 金属拉丝 |
+| `metal_gold` | 金色 | #FFD700 | 金色金属 |
+| `glass_clear` | 透明玻璃 | rgba(255,255,255,0.3) | 透明 |
+| `glass_frosted` | 磨砂玻璃 | rgba(255,255,255,0.5) | 半透明 |
 
----
+### 13.2 门板样式
 
-## 附录 B：板件材质预设
+| 样式ID | 中文名 | 说明 |
+|--------|--------|------|
+| `flat` | 平板门 | 无造型平板 |
+| `panel` | 造型门 | 中间凸起面板 |
+| `glass` | 玻璃门 | 中间玻璃嵌板 |
+| `louver` | 百叶门 | 横向百叶片 |
 
-| 材质标识 | 显示名称 | 颜色 | 说明 |
-|----------|----------|------|------|
-| wood_oak | 橡木 | #C49A6C | 浅棕木纹 |
-| wood_walnut | 胡桃木 | #6B4226 | 深棕木纹 |
-| wood_maple | 枫木 | #E8C596 | 浅黄木纹 |
-| wood_cherry | 樱桃木 | #A0522D | 红棕木纹 |
-| paint_white | 白色烤漆 | #F5F5F5 | 高光白 |
-| paint_black | 黑色烤漆 | #2C2C2C | 高光黑 |
-| paint_grey | 灰色烤漆 | #A0A0A0 | 中性灰 |
-| paint_blue | 蓝色烤漆 | #5B8BD4 | 雾蓝 |
-| metal_steel | 不锈钢 | #C0C0C0 | 拉丝金属 |
-| metal_gold | 金色 | #D4AF37 | 香槟金 |
-| glass_clear | 透明玻璃 | rgba(200,220,255,0.4) | 半透明 |
-| glass_frosted | 磨砂玻璃 | rgba(220,230,245,0.6) | 半透明雾面 |
+### 13.3 把手样式
 
----
-
-## 附录 C：板件约束规则（完整）
-
-```
-柜体坐标系：原点 = 柜体几何中心
-  X ∈ [-width/2, +width/2]   宽度方向
-  Y ∈ [-height/2, +height/2]  高度方向
-  Z ∈ [-depth/2, +depth/2]    深度方向
-
-顶板:
-  position_y = +(height/2 - top_thickness/2)
-  size: width × top_thickness × depth
-
-底板:
-  position_y = -(height/2 - bottom_thickness/2)
-  size: width × bottom_thickness × depth
-
-左侧板:
-  position_x = -(width/2 - left_thickness/2)
-  size: left_thickness × (height - top_thickness - bottom_thickness) × depth
-
-右侧板:
-  position_x = +(width/2 - right_thickness/2)
-  size: right_thickness × (height - top_thickness - bottom_thickness) × depth
-
-背板:
-  position_z = -(depth/2 - back_thickness/2)
-  size: (width - left_thickness - right_thickness) × (height - top_thickness - bottom_thickness) × back_thickness
-
-隔板(shelf):
-  宽度 = width - left_thickness - right_thickness - shelf_clearance
-  深度 = depth - back_thickness - shelf_clearance
-  Y范围: -(height/2 - bottom_thickness) + shelf_thickness/2  ~  +(height/2 - top_thickness) - shelf_thickness/2
-  默认厚度 = board_thickness
-
-门板(door):
-  覆盖区域Y范围: 由用户指定或默认全高
-  单扇宽度 = (width - gap_total) / door_count
-  高度 = 覆盖区域高度 - top_gap - bottom_gap
-  默认厚度 = 18mm
-  位置Z = +(depth/2 + door_thickness/2)  (柜体前方)
-
-抽屉(drawer):
-  宽度 = width - left_thickness - right_thickness - drawer_clearance
-  单个抽屉高度 = (可用高度 - gap_total) / drawer_count
-  默认厚度: 面板18mm, 盒体12mm
-```
+| 样式ID | 中文名 | 说明 |
+|--------|--------|------|
+| `hidden` | 隐藏把手 | 门板边沿内嵌 |
+| `long` | 长条把手 | 竖向长条拉手 |
+| `knob` | 圆钮把手 | 圆形小拉手 |
