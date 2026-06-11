@@ -184,18 +184,39 @@ export const useCabinetStore = defineStore('cabinet', () => {
     selectedComponentId.value = null;
   }
 
+  /** snake_case → camelCase */
+  function snk2cam(key: string): string {
+    return key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+  }
+
+  function convertKeys(obj: Record<string, any>): Record<string, any> {
+    const out: Record<string, any> = {};
+    for (const [k, v] of Object.entries(obj)) {
+      out[snk2cam(k)] = v;
+    }
+    return out;
+  }
+
   function applyAIOperations(operations: AIOperation[]): void {
     if (!cabinet.value) return;
     snapshotManager.value.takeSnapshot(cabinet.value, components.value, 'AI操作');
+
+    // 后端使用中心原点 (y=0 在柜子中心)，前端使用底部原点 (y=0 在柜子底部)
+    const yOffset = cabinet.value.height / 2;
 
     for (const op of operations) {
       switch (op.action) {
         case 'add':
           if (op.componentType) {
+            const converted = op.data ? convertKeys(op.data as Record<string, any>) : undefined;
+            // 坐标转换: 后端中心原点 → 前端底部原点
+            if (converted && typeof converted.positionY === 'number') {
+              converted.positionY += yOffset;
+            }
             const data = BoardFactory.createComponentData(
               op.componentType,
               cabinet.value,
-              op.data
+              converted
             );
             if (op.label) data.label = op.label;
             components.value.push(data);

@@ -6,12 +6,15 @@ but operate directly on the DB session for use within the agent/skill layer.
 """
 
 import json
+import logging
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from models.cabinet import Cabinet
 from models.component import Component
+
+logger = logging.getLogger(__name__)
 
 
 async def add_component(
@@ -60,7 +63,9 @@ async def add_component(
     db.add(comp)
     db.commit()
     db.refresh(comp)
-    return _component_to_dict(comp)
+    comp_dict = _component_to_dict(comp)
+    logger.info(f"[tools.add_component] created component id={comp.id}, type={component_type}, cabinet_id={cabinet_id}")
+    return {"action": "add", "componentType": component_type, "data": comp_dict}
 
 
 async def remove_component(
@@ -74,9 +79,9 @@ async def remove_component(
         Component.cabinet_id == cabinet_id,
     ).first()
     if comp is None:
-        return {"action": "remove", "component_id": component_id, "error": "not_found"}
+        return {"action": "remove", "componentId": component_id, "error": "not_found"}
 
-    result = {"action": "remove", "component_id": component_id, "component_type": comp.component_type}
+    result = {"action": "remove", "componentId": component_id, "componentType": comp.component_type}
     db.delete(comp)
     db.commit()
     return result
@@ -94,7 +99,7 @@ async def update_component(
         Component.cabinet_id == cabinet_id,
     ).first()
     if comp is None:
-        return {"action": "update", "component_id": component_id, "error": "not_found"}
+        return {"action": "update", "componentId": component_id, "error": "not_found"}
 
     for key, value in fields.items():
         if hasattr(comp, key) and value is not None:
@@ -102,7 +107,8 @@ async def update_component(
 
     db.commit()
     db.refresh(comp)
-    return _component_to_dict(comp)
+    comp_dict = _component_to_dict(comp)
+    return {"action": "update", "componentId": component_id, "data": comp_dict}
 
 
 async def get_cabinet_structure(
@@ -112,6 +118,7 @@ async def get_cabinet_structure(
     """Return the full cabinet structure as a dict including all components."""
     cabinet = db.query(Cabinet).filter(Cabinet.id == cabinet_id).first()
     if cabinet is None:
+        logger.warning(f"[tools.get_cabinet_structure] cabinet {cabinet_id} NOT FOUND")
         return {}
 
     components = (
@@ -120,6 +127,7 @@ async def get_cabinet_structure(
         .order_by(Component.sort_order, Component.id)
         .all()
     )
+    logger.info(f"[tools.get_cabinet_structure] cabinet {cabinet_id}: {len(components)} components")
 
     return {
         "id": cabinet.id,

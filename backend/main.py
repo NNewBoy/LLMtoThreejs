@@ -1,11 +1,14 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import logging
 
 from config import settings
 from database import Base, engine
 from routers import cabinets_router, components_router, history_router
 from routers.ai import router as ai_router
+
+logging.basicConfig(level=logging.INFO, format="%(name)s - %(message)s")
 
 
 @asynccontextmanager

@@ -1,6 +1,9 @@
 """ShelfSkill — adds shelves at specified positions within a cabinet."""
 
+import logging
 from skills.base import BaseSkill, SkillResult
+
+logger = logging.getLogger(__name__)
 
 
 class ShelfSkill(BaseSkill):
@@ -52,10 +55,13 @@ class ShelfSkill(BaseSkill):
 
         for ratio in position_ratios:
             y_pos = internal["y_min"] + ratio * internal["y_range"]
+            logger.info(f"[ShelfSkill] ratio={ratio}, y_pos={y_pos:.1f}, y_range={internal['y_range']:.1f}")
 
             if self._would_overlap(y_pos, existing_shelves, self.MIN_SHELF_SPACING):
+                logger.info(f"[ShelfSkill] skip overlap at y={y_pos:.1f}")
                 continue
 
+            logger.info(f"[ShelfSkill] adding shelf at y={y_pos:.1f}, w={internal['width']:.1f}, d={internal['depth']:.1f}")
             op = await add_component(
                 cabinet_id=cabinet_id,
                 component_type="shelf",
@@ -70,6 +76,15 @@ class ShelfSkill(BaseSkill):
             )
             operations.append(op)
             existing_shelves.append({"position_y": y_pos})
+
+        logger.info(f"[ShelfSkill] total added: {len(operations)} shelves")
+
+        if not operations:
+            return SkillResult(
+                success=False,
+                message="无法添加隔板（位置与已有板件重叠或空间不足）",
+                operations=[],
+            )
 
         return SkillResult(
             success=True,
