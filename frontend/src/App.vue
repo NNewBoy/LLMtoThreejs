@@ -46,6 +46,7 @@ onMounted(() => {
         <span class="separator" />
         <button class="btn" :disabled="!store.isDirty" @click="store.saveCabinet()">保存</button>
         <button class="btn" @click="store.loadCabinet(1)">加载</button>
+        <button class="btn" @click="store.refreshCabinet()">刷新</button>
       </div>
       <div class="header-right">
         <span class="status-dot" :class="{ dirty: store.isDirty }" />

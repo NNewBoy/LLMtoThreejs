@@ -4,7 +4,7 @@ from fastapi import HTTPException
 
 from models.cabinet import Cabinet
 from models.component import Component
-from schemas.cabinet import CabinetCreate, CabinetUpdate, CabinetSizeUpdate
+from schemas.cabinet import CabinetCreate, CabinetUpdate, CabinetSizeUpdate, CabinetFullUpdate, ComponentSync
 
 
 class CabinetService:
@@ -138,6 +138,55 @@ class CabinetService:
         update_data = data.model_dump(exclude_unset=True)
         for field, value in update_data.items():
             setattr(cabinet, field, value)
+        self.db.commit()
+        self.db.refresh(cabinet)
+        return cabinet
+
+    def full_update(self, cabinet_id: int, data: CabinetFullUpdate) -> Cabinet:
+        """Update cabinet and sync all components.
+
+        - Updates cabinet fields from data.cabinet
+        - Syncs components: adds new ones (no id), updates existing (with id),
+          and deletes components not in the submitted list.
+        """
+        cabinet = self.get(cabinet_id)
+
+        # Update cabinet fields
+        update_data = data.cabinet.model_dump(exclude_unset=True)
+        for field, value in update_data.items():
+            setattr(cabinet, field, value)
+
+        # Get existing component IDs for this cabinet
+        existing_components = (
+            self.db.query(Component)
+            .filter(Component.cabinet_id == cabinet_id)
+            .all()
+        )
+        existing_ids = {c.id for c in existing_components}
+        submitted_ids = {c.id for c in data.components if c.id is not None}
+
+        # Delete components not in submitted list
+        ids_to_delete = existing_ids - submitted_ids
+        if ids_to_delete:
+            self.db.query(Component).filter(
+                Component.id.in_(ids_to_delete),
+                Component.cabinet_id == cabinet_id,
+            ).delete(synchronize_session=False)
+
+        # Update or create components
+        for comp_data in data.components:
+            if comp_data.id is not None and comp_data.id in existing_ids:
+                # Update existing component
+                comp = next(c for c in existing_components if c.id == comp_data.id)
+                comp_dict = comp_data.model_dump(exclude={"id"})
+                for field, value in comp_dict.items():
+                    setattr(comp, field, value)
+            else:
+                # Create new component
+                comp_dict = comp_data.model_dump(exclude={"id"})
+                new_comp = Component(cabinet_id=cabinet_id, **comp_dict)
+                self.db.add(new_comp)
+
         self.db.commit()
         self.db.refresh(cabinet)
         return cabinet

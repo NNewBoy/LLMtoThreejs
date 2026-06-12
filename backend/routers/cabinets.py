@@ -6,6 +6,7 @@ from schemas.cabinet import (
     CabinetCreate,
     CabinetUpdate,
     CabinetSizeUpdate,
+    CabinetFullUpdate,
     CabinetResponse,
     CabinetDetailResponse,
     CabinetListResponse,
@@ -62,9 +63,10 @@ def get_cabinet(cabinet_id: int, svc: CabinetService = Depends(_svc)):
 
 @router.put("/{cabinet_id}", response_model=UnifiedResponse)
 def update_cabinet(
-    cabinet_id: int, body: CabinetUpdate, svc: CabinetService = Depends(_svc)
+    cabinet_id: int, body: CabinetFullUpdate, svc: CabinetService = Depends(_svc)
 ):
-    cabinet = svc.update(cabinet_id, body)
+    """Update cabinet and sync all components."""
+    cabinet = svc.full_update(cabinet_id, body)
     return UnifiedResponse(
         success=True, data=CabinetResponse.model_validate(cabinet).model_dump()
     )

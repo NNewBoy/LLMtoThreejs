@@ -52,6 +52,10 @@ export const useCabinetStore = defineStore('cabinet', () => {
       components.value = data.components;
       selectedComponentId.value = null;
       snapshotManager.value.clear();
+      // 保存初始状态快照
+      if (cabinet.value) {
+        snapshotManager.value.takeSnapshot(cabinet.value, components.value, '加载柜子');
+      }
       isDirty.value = false;
     } catch (err) {
       console.error('Failed to load cabinet:', err);
@@ -98,6 +102,11 @@ export const useCabinetStore = defineStore('cabinet', () => {
       isEnabled: true,
     }));
 
+    // 保存初始状态快照
+    snapshotManager.value.clear();
+    if (cabinet.value) {
+      snapshotManager.value.takeSnapshot(cabinet.value, components.value, '初始状态');
+    }
     isDirty.value = false;
   }
 
@@ -121,10 +130,10 @@ export const useCabinetStore = defineStore('cabinet', () => {
 
   function addComponent(type: ComponentType, options?: Partial<Component>): void {
     if (!cabinet.value) return;
-    snapshotManager.value.takeSnapshot(cabinet.value, components.value, `添加 ${type}`);
     const data = BoardFactory.createComponentData(type, cabinet.value, options);
     components.value.push(data);
     isDirty.value = true;
+    snapshotManager.value.takeSnapshot(cabinet.value, components.value, `添加 ${type}`);
   }
 
   function removeComponent(id: number): void {
@@ -133,7 +142,6 @@ export const useCabinetStore = defineStore('cabinet', () => {
     if (REQUIRED_COMPONENT_TYPES.has(comp.componentType)) return; // 必选板件不可删除
 
     if (!cabinet.value) return;
-    snapshotManager.value.takeSnapshot(cabinet.value, components.value, `删除 ${comp.label}`);
     components.value = components.value.filter((c) => c.id !== id);
 
     // 删除门板时自动删除关联拉手
@@ -147,6 +155,7 @@ export const useCabinetStore = defineStore('cabinet', () => {
       selectedComponentId.value = null;
     }
     isDirty.value = true;
+    snapshotManager.value.takeSnapshot(cabinet.value, components.value, `删除 ${comp.label}`);
   }
 
   function updateComponent(id: number, changes: Partial<Component>): void {
@@ -154,17 +163,16 @@ export const useCabinetStore = defineStore('cabinet', () => {
     if (idx === -1) return;
 
     if (!cabinet.value) return;
-    snapshotManager.value.takeSnapshot(cabinet.value, components.value, `修改 ${components.value[idx].label}`);
-
     components.value[idx] = { ...components.value[idx], ...changes };
     isDirty.value = true;
+    snapshotManager.value.takeSnapshot(cabinet.value, components.value, `修改 ${components.value[idx].label}`);
   }
 
   function selectComponent(id: number | null): void {
     selectedComponentId.value = id;
   }
 
-  function undo(): void {
+  async function undo(): Promise<void> {
     const snapshot = snapshotManager.value.undo();
     if (!snapshot) return;
     if (cabinet.value) {
@@ -172,9 +180,12 @@ export const useCabinetStore = defineStore('cabinet', () => {
     }
     components.value = snapshot.components;
     selectedComponentId.value = null;
+    isDirty.value = true;
+    // 同步撤销状态到后端
+    await saveCabinet();
   }
 
-  function redo(): void {
+  async function redo(): Promise<void> {
     const snapshot = snapshotManager.value.redo();
     if (!snapshot) return;
     if (cabinet.value) {
@@ -182,6 +193,9 @@ export const useCabinetStore = defineStore('cabinet', () => {
     }
     components.value = snapshot.components;
     selectedComponentId.value = null;
+    isDirty.value = true;
+    // 同步重做状态到后端
+    await saveCabinet();
   }
 
   /** snake_case → camelCase */
@@ -199,7 +213,6 @@ export const useCabinetStore = defineStore('cabinet', () => {
 
   function applyAIOperations(operations: AIOperation[]): void {
     if (!cabinet.value) return;
-    snapshotManager.value.takeSnapshot(cabinet.value, components.value, 'AI操作');
 
     // 后端使用中心原点 (y=0 在柜子中心)，前端使用底部原点 (y=0 在柜子底部)
     const yOffset = cabinet.value.height / 2;
@@ -243,6 +256,13 @@ export const useCabinetStore = defineStore('cabinet', () => {
       }
     }
     isDirty.value = true;
+    snapshotManager.value.takeSnapshot(cabinet.value, components.value, 'AI操作');
+  }
+
+  /** 刷新当前柜体状态到后端 */
+  async function refreshCabinet(): Promise<void> {
+    if (!cabinet.value) return;
+    await saveCabinet();
   }
 
   /** 重新计算柜体板件（柜体尺寸变化时） */
@@ -289,5 +309,6 @@ export const useCabinetStore = defineStore('cabinet', () => {
     redo,
     applyAIOperations,
     recalculateBodyBoards,
+    refreshCabinet,
   };
 });

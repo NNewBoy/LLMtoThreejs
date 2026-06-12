@@ -1,15 +1,18 @@
 import type { Cabinet, Component, CabinetSnapshot } from '../types';
 
 /**
- * 操作快照管理器 — 支持撤销/重做
- * SPEC2 section 4.1.4
+ * 操作快照管理器 — 支持撤销/重做（时间线方案）
+ *
+ * 使用 history 数组 + currentIndex 指针管理状态。
+ * takeSnapshot 在操作**后**调用，保存操作后的状态。
+ * undo 回退到上一个快照，redo 前进到下一个快照。
  */
 export class SnapshotManager {
-  private undoStack: CabinetSnapshot[] = [];
-  private redoStack: CabinetSnapshot[] = [];
+  private history: CabinetSnapshot[] = [];
+  private currentIndex: number = -1;
   private maxHistory = 50;
 
-  /** 记录当前状态快照 */
+  /** 保存当前状态快照（应在操作完成后调用） */
   takeSnapshot(cabinet: Cabinet, components: Component[], description: string = ''): void {
     const snapshot: CabinetSnapshot = {
       cabinet: JSON.parse(JSON.stringify(cabinet)),
@@ -17,40 +20,44 @@ export class SnapshotManager {
       timestamp: Date.now(),
       description,
     };
-    this.undoStack.push(snapshot);
-    if (this.undoStack.length > this.maxHistory) {
-      this.undoStack.shift();
+
+    // 新操作：截断 currentIndex 之后的 redo 历史
+    this.history = this.history.slice(0, this.currentIndex + 1);
+
+    this.history.push(snapshot);
+    this.currentIndex = this.history.length - 1;
+
+    // 超出上限时移除最早的快照
+    if (this.history.length > this.maxHistory) {
+      this.history.shift();
+      this.currentIndex--;
     }
-    // 新操作后清空重做栈
-    this.redoStack = [];
   }
 
-  /** 撤销：返回上一个状态 */
+  /** 撤销：回退到上一个快照，返回该状态 */
   undo(): CabinetSnapshot | null {
-    const snapshot = this.undoStack.pop();
-    if (!snapshot) return null;
-    this.redoStack.push(snapshot);
-    return this.undoStack.length > 0 ? this.undoStack[this.undoStack.length - 1] : null;
+    if (this.currentIndex <= 0) return null;
+    this.currentIndex--;
+    return this.history[this.currentIndex];
   }
 
-  /** 重做：返回下一个状态 */
+  /** 重做：前进到下一个快照，返回该状态 */
   redo(): CabinetSnapshot | null {
-    const snapshot = this.redoStack.pop();
-    if (!snapshot) return null;
-    this.undoStack.push(snapshot);
-    return snapshot;
+    if (this.currentIndex >= this.history.length - 1) return null;
+    this.currentIndex++;
+    return this.history[this.currentIndex];
   }
 
   canUndo(): boolean {
-    return this.undoStack.length > 0;
+    return this.currentIndex > 0;
   }
 
   canRedo(): boolean {
-    return this.redoStack.length > 0;
+    return this.currentIndex < this.history.length - 1;
   }
 
   clear(): void {
-    this.undoStack = [];
-    this.redoStack = [];
+    this.history = [];
+    this.currentIndex = -1;
   }
 }
